@@ -23,7 +23,7 @@
 Adafruit_SSD1306 display(WIDTH, HEIGHT, &Wire, OLED_RST);
 
 unsigned long lastAction = 0;
-int actionInterval = 100;
+int actionInterval = 1;
 
 uint8_t deviceAddress = 0xEE;
 const uint8_t broadcastAddress = 0xFF;
