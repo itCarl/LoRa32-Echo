@@ -26,7 +26,9 @@ unsigned long lastAction = 0;
 int actionInterval = 100;
 
 uint8_t deviceAddress = 0xEE;
-const uint8_t broadcastAddress = 0xFF; 
+const uint8_t broadcastAddress = 0xFF;
+uint8_t lastReceivedAddress = 0x00;
+int lastRSSI = 0;
 
 int msgCount = 0;
 
@@ -52,7 +54,7 @@ void setup()
     initDisplay();
     initLora();
 
-    LoRa.onReceive(onReceive);
+    // LoRa.onReceive(onReceive);
     LoRa.receive();
 
     Serial.println("[init] done.");    
@@ -62,10 +64,10 @@ void loop()
 {
     if(millis() - lastAction > actionInterval) {
         lastAction = millis();
-        // int packetSize = LoRa.parsePacket();
+        int packetSize = LoRa.parsePacket();
 
-        // if(packetSize)
-        //     onReceive(packetSize);
+        if(packetSize)
+            onReceive(packetSize);
     }
 }
 
@@ -140,6 +142,9 @@ void onReceive(int packetSize)
     if(msgLength != msg.length())
         printError("message length does not match.");
 
+    lastReceivedAddress = fromAdr;
+    lastRSSI = LoRa.packetRssi();
+
     // if message is for this device, or broadcast, print details:
     Serial.println("Received from: 0x" + String(fromAdr, HEX));
     Serial.println("Sent to: 0x" + String(toAdr, HEX));
@@ -169,7 +174,13 @@ void sendMessage(uint8_t to, uint8_t msgId, String msg)
     LoRa.write(msg.length());   // add payload length
     LoRa.print(msg);            // add payload
     
-    LoRa.endPacket(true);       // finish packet and send it  
+    LoRa.endPacket();       // finish packet and send it  
+}
+
+void fill(String &str, uint8_t totalLength, const char* chr = "0")
+{
+    for(uint8_t i = str.length(); i < totalLength; i++)
+        str = chr + str;
 }
 
 /**
@@ -177,11 +188,18 @@ void sendMessage(uint8_t to, uint8_t msgId, String msg)
  */
 void updateDisplay()
 {
+    String numReplies = String(msgCount);
+    fill(numReplies, 7);
+    
     display.clearDisplay();
     display.setCursor(0, 0);
     display.println("LoRa32 Echo");
-    display.println("Message Count:");
-    display.println(msgCount);
+    display.setCursor(0, display.getCursorY() + 10);
+    display.println("Total replies:");
+    display.setCursor(0, display.getCursorY() + 5);
+    display.println(numReplies);
+    display.println("last from: 0x"+ String(lastReceivedAddress, HEX));
+    display.println("last RSSI: "+ String(lastRSSI));
     display.display();
 }
 
