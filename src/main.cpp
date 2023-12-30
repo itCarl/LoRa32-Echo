@@ -1,16 +1,14 @@
 #include <SPI.h>
+#include <FS.h>
+// #include <SD.h>
+#include <SD_MMC.h>
 #include <LoRa.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
-// SX1278 pins
-#define SCK     5    // GPIO5  -- SX1278's SCK
-#define MISO    19   // GPIO19 -- SX1278's MISO
-#define MOSI    27   // GPIO27 -- SX1278's MOSI
-#define SS      18   // GPIO18 -- SX1278's CS
-#define RST     14   // GPIO14 -- SX1278's RESET
-#define DI0     26   // GPIO26 -- SX1278's IRQ(Interrupt Request)
+// LoRa
+// most LoRa pins are already defined in "pins_arduino.h" 
 #define BAND    868E6 // Europe freq
 
 // OLED pins
@@ -35,9 +33,11 @@ int msgCount = 0;
 // prototypes
 void initDisplay();
 void initLora();
+void initStorage();
 void onReceive(int packetSize);
 void sendMessage(uint8_t to, uint8_t msgId, String msg);
 void updateDisplay();
+void appendFile(const char *path, const char *message);
 void printError(String msg);
 
 
@@ -53,6 +53,7 @@ void setup()
 
     initDisplay();
     initLora();
+    initStorage();
 
     // LoRa.onReceive(onReceive);
     LoRa.receive();
@@ -97,15 +98,52 @@ void initDisplay()
  */
 void initLora()
 {
-    Serial.print("[init] LoRa... ");
-    SPI.begin(SCK, MISO, MOSI, SS);
-    LoRa.setPins(SS, RST, DI0);
+    Serial.print("[init] LoRa (SX1276)... ");
+    SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
+    LoRa.setPins(LORA_CS, LORA_RST, LORA_IRQ);
 
     if (!LoRa.begin(BAND)) {
         Serial.println("failed!");
         while(1);
     }
     Serial.println("Ok");
+}
+
+/**
+ * 
+ */
+void initStorage() 
+{
+    Serial.print("[init] Storage (SD MMC)... ");
+    if(!SD_MMC.begin()){
+        Serial.println("card mount failed");
+        while(1);
+    }
+    Serial.println("Ok");
+
+    Serial.println("[init] Storage info: ");
+
+    Serial.print("[init] Card type: ");
+    switch(SD_MMC.cardType()) {
+        case CARD_NONE: Serial.println("No SD_MMC card attached. Try another TF/SD Card"); while(1);
+        case CARD_MMC: Serial.println("mmc"); break;
+        case CARD_SD: Serial.println("sdsc"); break;
+        case CARD_SDHC: Serial.println("sdhc"); break;
+        default: Serial.println("unkown"); break;
+    }
+
+    Serial.printf("[init] Card Size: %lluMB\n", SD_MMC.cardSize() / (1024 * 1024));
+    Serial.printf("[init] Card total space: %lluMB\n", SD_MMC.totalBytes() / (1024 * 1024));
+    Serial.printf("[init] Card used space: %lluMB\n", SD_MMC.usedBytes() / (1024 * 1024));
+
+    if(!SD_MMC.exists("/data_lora"))
+        SD_MMC.mkdir("/data_lora");
+
+    if(!SD_MMC.exists("/data_lora/data.csv")) {
+        File f = SD_MMC.open("/data_lora/data.csv", "w+");
+        f.print("Longitude;Latitude;Value");
+        f.close();
+    }
 }
 
 /**
@@ -118,6 +156,8 @@ void onReceive(int packetSize)
     // packet structure
     // from address
     // to address
+    // location lat (from latitude)
+    // location lng (from longitude)
     // message id
     // message length - required since cb is used
     // message
@@ -131,6 +171,11 @@ void onReceive(int packetSize)
         return;
 
     uint8_t fromAdr = LoRa.read();
+    
+    double latitude, longitude;
+    LoRa.readBytes((uint8_t*)&latitude, sizeof(latitude));
+    LoRa.readBytes((uint8_t*)&longitude, sizeof(longitude));
+
     uint8_t msgId = LoRa.read();
     uint8_t msgLength = LoRa.read();
     // payload
@@ -148,6 +193,8 @@ void onReceive(int packetSize)
     // if message is for this device, or broadcast, print details:
     Serial.println("Received from: 0x" + String(fromAdr, HEX));
     Serial.println("Sent to: 0x" + String(toAdr, HEX));
+    Serial.println("Latitude: "+ String(latitude, 7));
+    Serial.println("Longitude: "+ String(longitude, 7));
     Serial.println("Message ID: " + String(msgId));
     Serial.println("Message length: " + String(msgLength));
     Serial.println("Message: " + msg);
@@ -173,7 +220,7 @@ void sendMessage(uint8_t to, uint8_t msgId, String msg)
     LoRa.write(msgId);          // add message ID
     LoRa.write(msg.length());   // add payload length
     LoRa.print(msg);            // add payload
-    
+
     LoRa.endPacket();       // finish packet and send it  
 }
 
@@ -201,6 +248,34 @@ void updateDisplay()
     display.println("last from: 0x"+ String(lastReceivedAddress, HEX));
     display.println("last RSSI: "+ String(lastRSSI));
     display.display();
+}
+
+/**
+ * 
+ */
+void storeData(double latitude, double longitude, int rssi)
+{
+    const char *data = "";
+    appendFile("/data_lora/data.csv", data);
+}
+
+/**
+ * 
+ */
+void appendFile(const char *path, const char *message)
+{
+    File file = SD_MMC.open(path, "a");
+    if(!file) {
+        Serial.println("Failed to open file for appending");
+        return;
+    }
+
+    if(file.print(message)) {
+        Serial.println("Message appended");
+        return;
+    }
+
+    Serial.println("Append failed");
 }
 
 /**
